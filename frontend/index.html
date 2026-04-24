@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task Manager - Distributed</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    color: #e2e8f0;
+    min-height: 100vh;
+    padding: 2rem 1rem;
+  }
+  .container { max-width: 800px; margin: 0 auto; }
+  h1 {
+    font-size: 2rem;
+    border-bottom: 3px solid #3b82f6;
+    padding-bottom: .5rem;
+    margin-bottom: 1.5rem;
+  }
+  h2 { font-size: 1.2rem; margin-bottom: .8rem; color: #93c5fd; }
+  .card {
+    background: rgba(30, 41, 59, 0.7);
+    backdrop-filter: blur(10px);
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.2rem;
+    box-shadow: 0 4px 20px rgba(0,0,0,.3);
+  }
+  .input-row { display: flex; gap: .5rem; }
+  input[type="text"] {
+    flex: 1;
+    padding: .7rem 1rem;
+    border-radius: 8px;
+    border: 1px solid #334155;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-size: 1rem;
+    outline: none;
+    transition: border .2s;
+  }
+  input[type="text"]:focus { border-color: #3b82f6; }
+  button {
+    padding: .7rem 1.4rem;
+    border-radius: 8px;
+    border: none;
+    background: #3b82f6;
+    color: white;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 600;
+    transition: background .2s;
+  }
+  button:hover { background: #2563eb; }
+  .task {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: .7rem .8rem;
+    background: #0f172a;
+    border-radius: 6px;
+    margin-bottom: .5rem;
+  }
+  .task-title { font-weight: 500; }
+  .task-id { color: #64748b; font-size: .85rem; margin-right: .5rem; }
+  .del {
+    background: #ef4444;
+    padding: .3rem .8rem;
+    font-size: .85rem;
+  }
+  .del:hover { background: #dc2626; }
+  .notif {
+    padding: .5rem .8rem;
+    background: #0f172a;
+    border-left: 3px solid #10b981;
+    margin-bottom: .4rem;
+    font-size: .9rem;
+    border-radius: 4px;
+  }
+  .notif .time { color: #64748b; font-size: .8rem; }
+  .empty { color: #64748b; font-style: italic; }
+  .status { font-size: .85rem; color: #64748b; margin-top: .5rem; }
+  .status.ok { color: #10b981; }
+  .status.err { color: #ef4444; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Task Manager</h1>
+
+  <div class="card">
+    <h2>Nouvelle tâche</h2>
+    <div class="input-row">
+      <input id="title" type="text" placeholder="Entrez un titre..." onkeydown="if(event.key==='Enter')addTask()">
+      <button onclick="addTask()">Ajouter</button>
+    </div>
+    <div id="status" class="status"></div>
+  </div>
+
+  <div class="card">
+    <h2>Tâches (task-service + PostgreSQL)</h2>
+    <div id="tasks" class="empty">Chargement...</div>
+  </div>
+
+  <div class="card">
+    <h2>Notifications (notification-service)</h2>
+    <div id="notifs" class="empty">Chargement...</div>
+  </div>
+</div>
+
+<script>
+const API = '/api';
+
+function setStatus(msg, ok) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = 'status ' + (ok ? 'ok' : 'err');
+  setTimeout(() => { el.textContent = ''; }, 2500);
+}
+
+async function loadTasks() {
+  try {
+    const res = await fetch(API + '/tasks');
+    const tasks = await res.json();
+    const el = document.getElementById('tasks');
+    el.className = tasks.length ? '' : 'empty';
+    el.innerHTML = tasks.length
+      ? tasks.map(t => `<div class="task"><span><span class="task-id">#${t.id}</span><span class="task-title">${escapeHtml(t.title)}</span></span><button class="del" onclick="delTask(${t.id})">Supprimer</button></div>`).join('')
+      : 'Aucune tâche pour le moment';
+  } catch (e) {
+    document.getElementById('tasks').innerHTML = '<span class="empty">Erreur de chargement</span>';
+  }
+}
+
+async function loadNotifs() {
+  try {
+    const res = await fetch(API + '/notifications');
+    const ns = await res.json();
+    const el = document.getElementById('notifs');
+    el.className = ns.length ? '' : 'empty';
+    el.innerHTML = ns.length
+      ? ns.map(n => `<div class="notif"><strong>${n.event}</strong> ${n.title ? '— ' + escapeHtml(n.title) : ''} <span class="time">(${new Date(n.receivedAt).toLocaleTimeString()})</span></div>`).join('')
+      : 'Aucune notification';
+  } catch (e) {
+    document.getElementById('notifs').innerHTML = '<span class="empty">Erreur de chargement</span>';
+  }
+}
+
+async function addTask() {
+  const input = document.getElementById('title');
+  const title = input.value.trim();
+  if (!title) return;
+  try {
+    const res = await fetch(API + '/tasks', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ title })
+    });
+    if (res.ok) {
+      input.value = '';
+      setStatus('Tâche créée', true);
+      setTimeout(() => { loadTasks(); loadNotifs(); }, 400);
+    } else {
+      setStatus('Erreur création', false);
+    }
+  } catch (e) {
+    setStatus('Erreur réseau', false);
+  }
+}
+
+async function delTask(id) {
+  await fetch(API + '/tasks/' + id, { method: 'DELETE' });
+  setTimeout(() => { loadTasks(); loadNotifs(); }, 300);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+loadTasks();
+loadNotifs();
+setInterval(() => { loadTasks(); loadNotifs(); }, 5000);
+</script>
+</body>
+</html>
